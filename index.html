@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dabba-style community WiFi planner</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EDF1F4;--surface:#fff;--ink:#14213D;--muted:#51607A;--line:#CBD5E0;--accent:#F2A900;--bad:#D64545;--good:#1E9E6A;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0E1626;--surface:#16213A;--ink:#E8EEF7;--muted:#9AA9C2;--line:#2A3858;--accent:#F2B93B;--bad:#F06767;--good:#4CD39B;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0E1626;--surface:#16213A;--ink:#E8EEF7;--muted:#9AA9C2;--line:#2A3858;--accent:#F2B93B;--bad:#F06767;--good:#4CD39B;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.55 "IBM Plex Sans",system-ui,sans-serif}
+h1,h2{font-family:"Bricolage Grotesque",system-ui,sans-serif;margin:0;line-height:1.1}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 56px}
+h1{font-size:clamp(30px,5vw,50px);font-weight:800;letter-spacing:-.02em}
+.sub{color:var(--muted);max-width:44em;margin:12px 0 22px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.ctrl{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:end;margin-bottom:14px}
+.ctrl label{display:flex;flex-direction:column;gap:4px;font-size:14px;color:var(--muted);min-width:150px}
+.ctrl output{color:var(--ink);font-weight:500}
+input[type=range]{accent-color:var(--accent);width:100%}
+select,button{font:500 15px "IBM Plex Sans",sans-serif;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.p{background:var(--accent);color:#14213D;border-color:var(--accent);font-weight:700}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+canvas{width:100%;display:block;border-radius:8px;touch-action:none}
+#map{cursor:crosshair}
+.hint{font-size:14px;color:var(--muted);margin:8px 2px 0}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+.stats b{display:block;font:700 28px "Bricolage Grotesque",sans-serif}
+.stats span{font-size:14px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+h2{font-size:24px;font-weight:700;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+td,th{text-align:left;padding:6px 4px;border-bottom:1px solid var(--line);font-weight:400}
+.tag{padding:2px 10px;border-radius:99px;font-size:13px;border:1px solid currentColor}
+#log div{font-size:14px;padding:5px 0;border-bottom:1px solid var(--line)}
+#log .none{color:var(--muted)}
+.fit{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:0;padding:0;list-style:none}
+.fit li{border-left:4px solid var(--accent);padding-left:12px}
+.fit strong{display:block}
+.fit span{color:var(--muted);font-size:15px}
+@media(max-width:820px){.stats{grid-template-columns:1fr 1fr}.grid,.fit{grid-template-columns:1fr}}
+</style></head><body><div class="wrap">
+<h1>Dabba-style community WiFi planner</h1>
+<p class="sub">A working model of what Dabba is building: a network of home-hosted nodes that share the airwaves. Place nodes, see coverage, and compare standard sharing (OMA) with NOMA, which pairs a near and a far user on the same channel. Built by Stuti Vats.</p>
+
+<div class="card">
+<div class="ctrl">
+<label>Node transmit power <output id="txo"></output><input id="tx" type="range" min="10" max="30" value="23"></label>
+<label>NOMA power given to near user <output id="alo"></output><input id="al" type="range" min="5" max="45" value="20"></label>
+<label>Target speed per home <output id="tho"></output><input id="th" type="range" min="1" max="30" value="8"></label>
+<label>Colour homes by<select id="mode"><option value="n">NOMA speed</option><option value="o">OMA speed</option></select></label>
+<button class="p" id="add">Add node</button><button id="del">Remove node</button><button id="shuf">New homes</button>
+</div>
+<canvas id="map"></canvas>
+<p class="hint">Click empty space to place a node. Drag a node to move it. Double-click a node to remove it. Green homes meet the target speed, red ones don't.</p>
+</div>
+
+<div class="stats">
+<div class="card"><b id="s1"></b><span>Average speed, OMA</span></div>
+<div class="card"><b id="s2"></b><span>Average speed, NOMA</span></div>
+<div class="card"><b id="s3"></b><span>Outage, OMA (below target)</span></div>
+<div class="card"><b id="s4"></b><span>Outage, NOMA (below target)</span></div>
+</div>
+
+<div class="grid">
+<div class="card"><h2>Outage probability</h2><canvas id="oc"></canvas>
+<p class="hint">Monte Carlo over 300 rounds of Rayleigh fading. The vertical line is your target speed.</p></div>
+<div class="card"><h2>Node health</h2><table id="tb"></table></div>
+</div>
+
+<div class="card" style="margin-bottom:14px"><h2>Fleet telemetry</h2>
+<canvas id="tc"></canvas>
+<div class="ctrl" style="margin:10px 0 6px"><button id="inj">Inject driver fault</button><span class="hint" style="margin:0">Packet retry rate per node. A rolling z-score flags anything abnormal.</span></div>
+<div id="log"><div class="none">No alerts yet.</div></div></div>
+
+<div class="card"><h2>Where my background fits</h2>
+<ul class="fit">
+<li><strong>NOMA and outage analysis</strong><span>My THz UAV relaying project derives outage probability. Here the same idea runs as a Monte Carlo simulation.</span></li>
+<li><strong>Embedded bring-up</strong><span>At Cusmat I wrote C/C++ for microcontrollers and tested hardware. Each node here is that kind of device.</span></li>
+<li><strong>RISC-V and FPGA at the edge</strong><span>My DIR-V design processes data on the device. Nodes could pre-filter telemetry the same way.</span></li>
+<li><strong>Monitoring and analytics</strong><span>At Netradyne I analyse telematics at scale in Python and SQL. The panel above applies that to node health.</span></li>
+</ul>
+<p class="hint">This is a simulation with simplified physics, not real firmware.</p></div>
+</div>
+<script>
+const $=id=>document.getElementById(id),W=800,H=500,M=.5,B=20,dpr=Math.min(devicePixelRatio||1,2);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setup(c,h){c.width=W*dpr;c.height=h*dpr;c.style.aspectRatio=W+'/'+h;const x=c.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);return x}
+const map=$('map'),mx=setup(map,H),oc=$('oc'),ox=setup(oc,420),tc=$('tc'),tx_=setup(tc,170);
+let seed=7;const rnd=()=>(seed=seed*16807%2147483647,(seed-1)/2147483646);
+let aps=[{x:200,y:150},{x:560,y:170},{x:380,y:380}],users=[],gm,groups,pairs,mcr;
+function gen(){seed=Math.floor(Math.random()*1e6)+1;users=[];for(let i=0;i<40;i++)users.push({x:30+rnd()*(W-60),y:30+rnd()*(H-60)})}
+const gain=(a,u)=>10**(-(40+36*Math.log10(Math.max(1,Math.hypot(a.x-u.x,a.y-u.y)*M)))/10);
+const P=()=>10**(($('tx').value-30)/10),N0=10**((-85-30)/10);
+function net(){
+ gm=users.map(u=>aps.map(a=>gain(a,u)));
+ users.forEach((u,i)=>u.s=gm[i].indexOf(Math.max(...gm[i])));
+ groups=aps.map(()=>[]);users.forEach((u,i)=>groups[u.s].push(i));
+ pairs=groups.map((gr,k)=>{gr.sort((a,b)=>gm[b][k]-gm[a][k]);const n=gr.length,h=n>>1,ps=[];
+  for(let j=0;j<h;j++)ps.push([gr[j],gr[n-1-j]]);if(n%2)ps.push([gr[h]]);return ps});
+}
+function rates(fade){
+ const p=P(),al=$('al').value/100,g=fade?gm.map(r=>r.map(x=>x*-Math.log(1-Math.random()))):gm,oma=[],noma=[];
+ const I=(i,k)=>{let s=N0;g[i].forEach((x,j)=>{if(j!==k)s+=x*p});return s};
+ aps.forEach((a,k)=>{const gr=groups[k],S=pairs[k].length;
+  gr.forEach(i=>oma[i]=B/gr.length*Math.log2(1+p*g[i][k]/I(i,k)));
+  pairs[k].forEach(pr=>{const bw=B/S;
+   if(pr.length==1){noma[pr[0]]=bw*Math.log2(1+p*g[pr[0]][k]/I(pr[0],k));return}
+   const[n,f]=pr;
+   noma[n]=bw*Math.log2(1+al*p*g[n][k]/I(n,k));
+   noma[f]=bw*Math.log2(1+(1-al)*p*g[f][k]/(al*p*g[f][k]+I(f,k)))})});
+ return{oma,noma}}
+const avg=a=>a.reduce((x,y)=>x+y,0)/a.length,out=(a,t)=>a.filter(x=>x<t).length/a.length;
+function mc(){const o=[],n=[];for(let t=0;t<300;t++){const r=rates(true);o.push(...r.oma);n.push(...r.noma)}mcr={o,n}}
+function heat(){const p=P(),s=10;
+ for(let x=0;x<W;x+=s)for(let y=0;y<H;y+=s){const c={x:x+5,y:y+5},g=aps.map(a=>gain(a,c)),m=Math.max(...g),i=p*(g.reduce((a,b)=>a+b,0)-m)+N0,d=10*Math.log10(p*m/i),t=Math.max(0,Math.min(1,(d+5)/35));
+  mx.fillStyle=`hsla(${210-t*165},80%,55%,${.06+.3*t})`;mx.fillRect(x,y,s,s)}}
+function draw(){
+ mx.clearRect(0,0,W,H);heat();const r=rates(false)[$('mode').value=='n'?'noma':'oma'],th=+$('th').value;
+ users.forEach((u,i)=>{const a=aps[u.s];mx.strokeStyle=css('--line');mx.lineWidth=1;mx.beginPath();mx.moveTo(u.x,u.y);mx.lineTo(a.x,a.y);mx.stroke()});
+ users.forEach((u,i)=>{mx.fillStyle=r[i]>=th?css('--good'):css('--bad');mx.beginPath();mx.arc(u.x,u.y,5,0,7);mx.fill()});
+ aps.forEach((a,k)=>{mx.fillStyle=css('--accent');mx.strokeStyle=css('--ink');mx.lineWidth=2;mx.beginPath();mx.roundRect(a.x-14,a.y-10,28,22,[4,4,8,8]);mx.fill();mx.stroke();
+  mx.beginPath();mx.moveTo(a.x-9,a.y-14);mx.lineTo(a.x+9,a.y-14);mx.stroke();
+  mx.fillStyle='#14213D';mx.font='700 13px sans-serif';mx.textAlign='center';mx.fillText(k+1,a.x,a.y+5)})}
+function chart(){
+ const x=ox,w=W,h=420,L=50,T=20,R=20,Bm=40,th=+$('th').value,ink=css('--ink'),mu=css('--muted');x.clearRect(0,0,w,h);
+ x.strokeStyle=css('--line');x.fillStyle=mu;x.font='14px sans-serif';x.textAlign='right';x.lineWidth=1;
+ for(let v=0;v<=1;v+=.25){const y=T+(1-v)*(h-T-Bm);x.beginPath();x.moveTo(L,y);x.lineTo(w-R,y);x.stroke();x.fillText(Math.round(v*100)+'%',L-6,y+5)}
+ x.textAlign='center';for(let v=0;v<=30;v+=10)x.fillText(v+' Mbps',L+v/30*(w-L-R),h-14);
+ const line=(a,c)=>{x.strokeStyle=c;x.lineWidth=3;x.beginPath();for(let v=0;v<=30;v+=.5){const px=L+v/30*(w-L-R),py=T+(1-out(a,v))*(h-T-Bm);v?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()};
+ line(mcr.o,mu);line(mcr.n,css('--accent'));
+ const tx=L+th/30*(w-L-R);x.strokeStyle=ink;x.setLineDash([5,5]);x.lineWidth=1.5;x.beginPath();x.moveTo(tx,T);x.lineTo(tx,h-Bm);x.stroke();x.setLineDash([]);
+ x.textAlign='left';x.fillStyle=mu;x.fillRect(L+10,T+6,16,4);x.fillStyle=ink;x.fillText('OMA',L+32,T+12);x.fillStyle=css('--accent');x.fillRect(L+90,T+6,16,4);x.fillStyle=ink;x.fillText('NOMA',L+112,T+12)}
+function table(){const p=P(),av=users.length/aps.length;
+ $('tb').innerHTML='<tr><th>Node</th><th>Homes</th><th>Avg SINR</th><th>Status</th></tr>'+aps.map((a,k)=>{
+  const gr=groups[k],s=gr.length?avg(gr.map(i=>{let o=N0;gm[i].forEach((x,j)=>{if(j!==k)o+=x*p});return 10*Math.log10(p*gm[i][k]/o)})):0;
+  const st=!gr.length?['Idle','--muted']:gr.length>1.5*av?['Congested','--bad']:s<3?['Weak signal','--bad']:['Healthy','--good'];
+  return`<tr><td>Node ${k+1}</td><td>${gr.length}</td><td>${s.toFixed(1)} dB</td><td><span class="tag" style="color:var(${st[1]})">${st[0]}</span></td></tr>`}).join('')}
+function update(){
+ $('txo').textContent=$('tx').value+' dBm';$('alo').textContent=$('al').value+'%';$('tho').textContent=$('th').value+' Mbps';
+ net();mc();const r=rates(false),t=+$('th').value;
+ $('s1').textContent=avg(r.oma).toFixed(1)+' Mbps';$('s2').textContent=avg(r.noma).toFixed(1)+' Mbps';
+ $('s3').textContent=(out(mcr.o,t)*100).toFixed(1)+'%';$('s4').textContent=(out(mcr.n,t)*100).toFixed(1)+'%';
+ draw();chart();table()}
+['tx','al','th'].forEach(i=>$(i).oninput=update);$('mode').onchange=update;$('shuf').onclick=()=>{gen();update()};
+function addAp(x,y){if(aps.length<8){aps.push({x,y});return aps.length-1}return -1}
+function delAp(k){if(aps.length>1){aps.splice(k,1);ser.splice(k,1);fault.splice(k,1);cool.splice(k,1);update()}}
+$('add').onclick=()=>{addAp(60+Math.random()*(W-120),60+Math.random()*(H-120));update()};$('del').onclick=()=>delAp(aps.length-1);
+let drag=-1;const pos=e=>{const b=map.getBoundingClientRect();return{x:(e.clientX-b.left)/b.width*W,y:(e.clientY-b.top)/b.height*H}};
+map.onpointerdown=e=>{const p=pos(e);drag=aps.findIndex(a=>Math.hypot(a.x-p.x,a.y-p.y)<20);if(drag<0)drag=addAp(p.x,p.y);map.setPointerCapture(e.pointerId);update()};
+map.onpointermove=e=>{if(drag<0)return;const p=pos(e);aps[drag].x=Math.max(10,Math.min(W-10,p.x));aps[drag].y=Math.max(10,Math.min(H-10,p.y));update()};
+map.onpointerup=()=>drag=-1;
+map.ondblclick=e=>{const p=pos(e),k=aps.findIndex(a=>Math.hypot(a.x-p.x,a.y-p.y)<20);if(k>=0)delAp(k)};
+const ser=[],fault=[],cool=[],cols=['#F2A900','#2A7DE1','#1E9E6A','#D64545','#8E5BD6','#E1782A','#2AA6B5','#7A8699'];
+function log(m){const l=$('log');l.querySelector('.none')?.remove();const d=document.createElement('div');d.textContent=new Date().toLocaleTimeString()+'  '+m;l.prepend(d);while(l.children.length>5)l.lastChild.remove()}
+$('inj').onclick=()=>{fault[Math.floor(Math.random()*aps.length)]=10};
+function tel(){aps.forEach((a,k)=>{ser[k]=ser[k]||[];cool[k]=Math.max(0,(cool[k]||0)-1);
+ const v=2+(groups[k]?groups[k].length:0)*.25+(Math.random()-.5)*1.2+(fault[k]>0?16+Math.random()*4:0);if(fault[k]>0)fault[k]--;
+ const h=ser[k].slice(-30);
+ if(h.length>=15&&!cool[k]){const m=avg(h),sd=Math.max(.5,Math.sqrt(avg(h.map(a=>(a-m)**2)))),z=(v-m)/sd;
+  if(z>3.5){cool[k]=10;log(`Node ${k+1}: retry rate ${v.toFixed(1)}% (z = ${z.toFixed(1)}). Check the latest driver build.`)}}
+ ser[k].push(v);if(ser[k].length>100)ser[k].shift()});drawTel()}
+function drawTel(){const x=tx_,h=170;x.clearRect(0,0,W,h);x.strokeStyle=css('--line');x.fillStyle=css('--muted');x.font='13px sans-serif';x.textAlign='left';
+ [0,10,20].forEach(v=>{const y=h-10-v/25*(h-20);x.beginPath();x.moveTo(36,y);x.lineTo(W,y);x.stroke();x.fillText(v+'%',2,y+4)});
+ ser.forEach((s,k)=>{x.strokeStyle=cols[k%8];x.lineWidth=2;x.beginPath();s.forEach((v,i)=>{const px=36+i/99*(W-40),py=h-10-Math.min(v,25)/25*(h-20);i?x.lineTo(px,py):x.moveTo(px,py)});x.stroke()})}
+matchMedia('(prefers-color-scheme:dark)').onchange=()=>{draw();chart();drawTel()};
+gen();update();for(let i=0;i<40;i++)tel();setInterval(tel,800);
+</script></body></html>
